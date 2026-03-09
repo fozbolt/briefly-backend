@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+dist/
+
+# env
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+*.pem
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# typescript
+*.tsbuildinfo
