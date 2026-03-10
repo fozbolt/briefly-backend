@@ -15,6 +15,9 @@ dist/
 .DS_Store
 *.pem
 
+# project context (local only)
+context.md
+
 # debug
 npm-debug.*
 yarn-debug.*
