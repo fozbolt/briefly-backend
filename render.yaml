@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: briefly-backend
+    runtime: node
+    region: oregon
+    plan: free
+    branch: full-integration
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_TYPE
+        value: sqlite
+      - key: DB_SQLITE_PATH
+        value: /tmp/briefly.db
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: OPENWEATHERMAP_API_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_KEY
+        sync: false
+      - key: FREE_LLM_BASE
+        value: https://text.pollinations.ai
+      - key: FREE_LLM_MODEL
+        value: openai-fast
