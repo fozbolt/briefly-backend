@@ -219,5 +219,41 @@ describe('Briefly API (e2e)', () => {
           expect(typeof res.body.message).toBe('string');
         });
     }, 30000);
+
+    it('should accept conversation history', () => {
+      return request(app.getHttpServer())
+        .post('/api/chat/bri')
+        .send({
+          message: 'Tell me more',
+          history: [
+            { role: 'user', content: 'Hello' },
+            { role: 'assistant', content: 'Hi there!' },
+          ],
+        })
+        .expect(201)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('message');
+          expect(typeof res.body.message).toBe('string');
+        });
+    }, 30000);
+  });
+
+  describe('GET /api/listen/narration', () => {
+    it('should return narration payload', () => {
+      return request(app.getHttpServer())
+        .get('/api/listen/narration?userName=TestUser')
+        .expect(200)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('script');
+          expect(res.body).toHaveProperty('sections');
+          expect(res.body).toHaveProperty('estimatedDurationSec');
+          expect(res.body).toHaveProperty('generatedAtLabel');
+          expect(typeof res.body.script).toBe('string');
+          expect(res.body.script.length).toBeGreaterThan(50);
+          expect(Array.isArray(res.body.sections)).toBe(true);
+          expect(res.body.sections.length).toBe(6);
+          expect(res.body.script).toContain('TestUser');
+        });
+    }, 30000);
   });
 });

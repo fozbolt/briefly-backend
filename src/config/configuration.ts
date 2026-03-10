@@ -38,4 +38,8 @@ export default () => ({
     hbr: 'https://feeds.hbr.org/harvardbusiness',
     fastCompany: 'https://www.fastcompany.com/latest/rss',
   },
+  llm: {
+    baseUrl: process.env.FREE_LLM_BASE || 'https://text.pollinations.ai',
+    model: process.env.FREE_LLM_MODEL || 'openai-fast',
+  },
 });

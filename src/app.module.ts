@@ -11,6 +11,7 @@ import { SocialModule } from './modules/social/social.module';
 import { DigestModule } from './modules/digest/digest.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { ListenModule } from './modules/listen/listen.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ChatModule } from './modules/chat/chat.module';
     DigestModule,
     AuthModule,
     ChatModule,
+    ListenModule,
   ],
   controllers: [AppController],
 })

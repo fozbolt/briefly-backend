@@ -1,5 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
-import { ChatService } from './chat.service';
+import { ChatService, ChatTurn } from './chat.service';
 
 @Controller('chat')
 export class ChatController {
@@ -7,8 +7,8 @@ export class ChatController {
 
   @Post('bri')
   async sendMessage(
-    @Body() body: { message: string },
+    @Body() body: { message: string; history?: ChatTurn[] },
   ): Promise<{ message: string }> {
-    return this.chatService.sendMessage(body.message);
+    return this.chatService.sendMessage(body.message, body.history || []);
   }
 }
