@@ -6,8 +6,16 @@ import { UserPreference } from './entities/user-preference.entity';
 import { SavedItem } from './entities/saved-item.entity';
 import { DigestCache } from './entities/digest-cache.entity';
 import { ContentItem } from './entities/content-item.entity';
+import { EmailVerificationToken } from './entities/email-verification-token.entity';
 
-const entities = [User, UserPreference, SavedItem, DigestCache, ContentItem];
+const entities = [
+  User,
+  UserPreference,
+  SavedItem,
+  DigestCache,
+  ContentItem,
+  EmailVerificationToken,
+];
 
 @Module({
   imports: [
@@ -25,8 +33,8 @@ const entities = [User, UserPreference, SavedItem, DigestCache, ContentItem];
             password: config.get<string>('database.password'),
             database: config.get<string>('database.name'),
             entities,
-            synchronize: true,
-            logging: false,
+            synchronize: config.get<boolean>('database.synchronize') ?? false,
+            logging: (process.env.NODE_ENV || 'development') !== 'production',
           };
         }
 
@@ -35,8 +43,8 @@ const entities = [User, UserPreference, SavedItem, DigestCache, ContentItem];
           type: 'better-sqlite3' as const,
           database: config.get<string>('database.sqlitePath') || './briefly.db',
           entities,
-          synchronize: true,
-          logging: false,
+          synchronize: config.get<boolean>('database.synchronize') ?? false,
+          logging: (process.env.NODE_ENV || 'development') !== 'production',
         };
       },
     }),

@@ -10,22 +10,22 @@ export class ContentItem {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', length: 120 })
   source!: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', length: 80 })
   category!: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', length: 255 })
   title!: string;
 
   @Column({ type: 'text', nullable: true, default: null })
   description!: string;
 
-  @Column({ type: 'varchar', nullable: true, default: null })
+  @Column({ type: 'varchar', length: 2048, nullable: true, default: null })
   url!: string;
 
-  @Column({ type: 'varchar', nullable: true, default: null })
+  @Column({ type: 'varchar', length: 2048, nullable: true, default: null })
   imageUrl!: string;
 
   @Column({ type: 'text', nullable: true, default: null })

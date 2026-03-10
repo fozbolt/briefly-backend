@@ -1,35 +1,184 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { User } from '../../database/entities/user.entity';
+import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
+import { AuthMailerService } from './auth-mailer.service';
+
+type UserRecord = any;
+type TokenRecord = any;
+
+function createDeleteBuilder(tokens: TokenRecord[]) {
+  let userId: string | null = null;
+  let excludeId: string | null = null;
+
+  return {
+    delete() {
+      return this;
+    },
+    from() {
+      return this;
+    },
+    where(_query: string, params: Record<string, string>) {
+      userId = params.userId;
+      return this;
+    },
+    andWhere(_query: string, params: Record<string, string>) {
+      excludeId = params.id;
+      return this;
+    },
+    async execute() {
+      for (let index = tokens.length - 1; index >= 0; index -= 1) {
+        const token = tokens[index];
+        if (userId && token.user.id !== userId) {
+          continue;
+        }
+        if (excludeId && token.id === excludeId) {
+          continue;
+        }
+        tokens.splice(index, 1);
+      }
+      return { affected: 1 };
+    },
+  };
+}
 
 describe('AuthService', () => {
   let service: AuthService;
 
-  const mockUsers: any[] = [];
+  const mockUsers: UserRecord[] = [];
+  const mockTokens: TokenRecord[] = [];
 
   const mockUserRepo = {
-    findOne: jest.fn(({ where }: any) => {
+    findOne: jest.fn(async ({ where, select }: any) => {
       const found = mockUsers.find((u) => u.email === where.email);
-      return Promise.resolve(found || null);
+      if (!found) {
+        return null;
+      }
+      if (!select) {
+        return found;
+      }
+      const picked: Record<string, unknown> = {};
+      for (const [key, include] of Object.entries(select)) {
+        if (include) {
+          picked[key] = found[key];
+        }
+      }
+      return picked;
     }),
     create: jest.fn((data: any) => ({
-      id: 'test-uuid-' + Date.now(),
+      id: `user-${Date.now()}-${Math.random()}`,
+      level: 'Explorer',
+      emailVerified: false,
+      emailVerifiedAt: null,
       ...data,
     })),
-    save: jest.fn((user: any) => {
+    save: jest.fn(async (user: any) => {
+      const existingIndex = mockUsers.findIndex((item) => item.id === user.id);
+      if (existingIndex >= 0) {
+        mockUsers[existingIndex] = { ...mockUsers[existingIndex], ...user };
+        return mockUsers[existingIndex];
+      }
       mockUsers.push(user);
-      return Promise.resolve(user);
+      return user;
     }),
+    update: jest.fn(async (id: string, patch: Record<string, unknown>) => {
+      const user = mockUsers.find((item) => item.id === id);
+      if (user) {
+        Object.assign(user, patch);
+      }
+      return { affected: user ? 1 : 0 };
+    }),
+    manager: {
+      transaction: jest.fn(async (callback: any) => {
+        const manager = {
+          getRepository: (entity: any) => {
+            if (entity === User) {
+              return {
+                update: mockUserRepo.update,
+              };
+            }
+            if (entity === EmailVerificationToken) {
+              return {
+                update: mockTokenRepo.update,
+                createQueryBuilder: () => createDeleteBuilder(mockTokens),
+              };
+            }
+            throw new Error('Unknown repository entity');
+          },
+        };
+        return callback(manager);
+      }),
+    },
+  };
+
+  const mockTokenRepo = {
+    create: jest.fn((data: any) => ({
+      id: `token-${Date.now()}-${Math.random()}`,
+      ...data,
+    })),
+    save: jest.fn(async (token: any) => {
+      mockTokens.push(token);
+      return token;
+    }),
+    createQueryBuilder: jest.fn(() => createDeleteBuilder(mockTokens)),
+    findOne: jest.fn(async ({ where }: any) => {
+      if (where?.tokenHash) {
+        return mockTokens.find((token) => token.tokenHash === where.tokenHash) ?? null;
+      }
+      return null;
+    }),
+    update: jest.fn(async (id: string, patch: Record<string, unknown>) => {
+      const token = mockTokens.find((item) => item.id === id);
+      if (token) {
+        Object.assign(token, patch);
+      }
+      return { affected: token ? 1 : 0 };
+    }),
+  };
+
+  const mockMailerService = {
+    sendVerificationEmail: jest.fn(async ({ verificationUrl }: any) => ({
+      delivered: true,
+      provider: 'console' as const,
+      verificationUrl,
+    })),
   };
 
   beforeEach(async () => {
     mockUsers.length = 0;
+    mockTokens.length = 0;
     jest.clearAllMocks();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: getRepositoryToken(User), useValue: mockUserRepo },
+        {
+          provide: getRepositoryToken(EmailVerificationToken),
+          useValue: mockTokenRepo,
+        },
+        { provide: AuthMailerService, useValue: mockMailerService },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'auth.tokenSecret') return 'unit-test-secret';
+              if (key === 'auth.tokenTtlHours') return 24;
+              if (key === 'email.verificationBaseUrl') return 'http://localhost:3000/api';
+              if (key === 'email.verificationTokenTtlMinutes') return 60;
+              if (key === 'email.provider') return 'console';
+              return undefined;
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -40,46 +189,129 @@ describe('AuthService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should register a new user', async () => {
+  it('should register and return verification-pending response', async () => {
     const result = await service.register('John Doe', 'john@test.com', 'password123');
 
-    expect(result).toHaveProperty('token');
-    expect(result).toHaveProperty('user');
-    expect(result.token).toMatch(/^briefly_/);
-    expect(result.user.email).toBe('john@test.com');
-    expect(result.user.fullName).toBe('John');
-    expect(mockUserRepo.create).toHaveBeenCalled();
+    expect('requiresEmailVerification' in result).toBe(true);
+    if ('requiresEmailVerification' in result) {
+      expect(result.requiresEmailVerification).toBe(true);
+      expect(result.email).toBe('john@test.com');
+      expect(result.devVerificationUrl).toContain('/auth/verify-email?token=');
+    }
     expect(mockUserRepo.save).toHaveBeenCalled();
+    expect(mockMailerService.sendVerificationEmail).toHaveBeenCalled();
+    expect(mockTokens.length).toBe(1);
   });
 
-  it('should return existing user on duplicate registration', async () => {
-    // Register first
-    await service.register('John Doe', 'john@test.com', 'password123');
+  it('should normalize email casing on registration', async () => {
+    const result = await service.register('Case User', 'Case.User@TEST.com', 'password123');
+    if ('requiresEmailVerification' in result) {
+      expect(result.email).toBe('case.user@test.com');
+    }
+  });
 
-    // Register again with same email
+  it('should reject duplicate verified registration', async () => {
+    mockUsers.push({
+      id: 'existing-1',
+      name: 'John Doe',
+      email: 'john@test.com',
+      authProvider: 'local',
+      emailVerified: true,
+      emailVerifiedAt: new Date(),
+    });
+
+    await expect(
+      service.register('John Doe', 'john@test.com', 'password123'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('should resend verification for duplicate unverified registration', async () => {
+    mockUsers.push({
+      id: 'existing-2',
+      name: 'John Doe',
+      email: 'john@test.com',
+      authProvider: 'local',
+      emailVerified: false,
+      emailVerifiedAt: null,
+    });
+
     const result = await service.register('John Doe', 'john@test.com', 'password123');
-
-    expect(result.user.email).toBe('john@test.com');
-    // Should not create a second user
-    expect(mockUserRepo.create).toHaveBeenCalledTimes(1);
+    expect('requiresEmailVerification' in result).toBe(true);
+    expect(mockUserRepo.create).not.toHaveBeenCalled();
+    expect(mockMailerService.sendVerificationEmail).toHaveBeenCalled();
   });
 
-  it('should login and auto-create user', async () => {
-    const result = await service.login('newuser@test.com', 'password');
-
-    expect(result).toHaveProperty('token');
-    expect(result.token).toMatch(/^briefly_/);
-    expect(result.user.email).toBe('newuser@test.com');
+  it('should reject login for non-existing user', async () => {
+    await expect(service.login('newuser@test.com', 'password123')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
   });
 
-  it('should login with existing user', async () => {
-    // Create user first
-    await service.register('Jane Smith', 'jane@test.com', 'pass');
+  it('should reject login while email is not verified', async () => {
+    const registerResult = await service.register('Jane Smith', 'jane@test.com', 'password123');
+    expect('requiresEmailVerification' in registerResult).toBe(true);
 
-    // Login
-    const result = await service.login('jane@test.com', 'pass');
+    await expect(service.login('jane@test.com', 'password123')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
 
-    expect(result.user.email).toBe('jane@test.com');
+  it('should verify email and allow login', async () => {
+    const registerResult = await service.register('Jane Smith', 'jane@test.com', 'password123');
+    const verificationUrl =
+      'requiresEmailVerification' in registerResult ? registerResult.devVerificationUrl : '';
+    const token = verificationUrl?.split('token=')[1] ?? '';
+    expect(token.length).toBeGreaterThan(10);
+
+    const verifyResult = await service.verifyEmailToken(decodeURIComponent(token));
+    expect(verifyResult.status).toBe('verified');
+
+    const loginResult = await service.login('jane@test.com', 'password123');
+    expect(loginResult.user.email).toBe('jane@test.com');
+    expect(loginResult.token).toMatch(/^briefly_/);
+  });
+
+  it('should resend verification for unverified users', async () => {
+    const registerResult = await service.register('Resend User', 'resend@test.com', 'password123');
+    expect('requiresEmailVerification' in registerResult).toBe(true);
+
+    const resendResult = await service.resendVerification('resend@test.com');
+    expect(resendResult.requiresEmailVerification).toBe(true);
+    expect(resendResult.email).toBe('resend@test.com');
+    expect(mockMailerService.sendVerificationEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it('should reject expired verification links', async () => {
+    const registerResult = await service.register('Expired User', 'expired@test.com', 'password123');
+    const token =
+      'requiresEmailVerification' in registerResult
+        ? registerResult.devVerificationUrl?.split('token=')[1] ?? ''
+        : '';
+    expect(token).toBeTruthy();
+    mockTokens[0].expiresAt = new Date(Date.now() - 1000);
+
+    const verifyResult = await service.verifyEmailToken(decodeURIComponent(token));
+    expect(verifyResult.status).toBe('expired');
+  });
+
+  it('should reject login with wrong password', async () => {
+    const registerResult = await service.register('Jane Smith', 'jane@test.com', 'correct-password');
+    const token =
+      'requiresEmailVerification' in registerResult
+        ? registerResult.devVerificationUrl?.split('token=')[1] ?? ''
+        : '';
+    await service.verifyEmailToken(decodeURIComponent(token));
+
+    await expect(service.login('jane@test.com', 'wrong-password')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('should reject password login for OAuth-only users', async () => {
+    await service.oauthLogin('google', 'auth-code-123');
+    await expect(
+      service.login('demo-google@briefly.app', 'password123'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('should handle OAuth login', async () => {
@@ -87,12 +319,29 @@ describe('AuthService', () => {
 
     expect(result).toHaveProperty('token');
     expect(result.user.email).toBe('demo-google@briefly.app');
-    expect(result.user.fullName).toBe('Alex');
+    expect(result.user.fullName).toBe('Google');
+  });
+
+  it('should reject unknown OAuth providers', async () => {
+    await expect(service.oauthLogin('unsupported', 'auth-code-123')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('should generate unique tokens', async () => {
-    const result1 = await service.login('user1@test.com', 'pass');
-    const result2 = await service.login('user2@test.com', 'pass');
+    const regOne = await service.register('User One', 'user1@test.com', 'password123');
+    const regTwo = await service.register('User Two', 'user2@test.com', 'password123');
+    const tokenOne =
+      'requiresEmailVerification' in regOne ? regOne.devVerificationUrl?.split('token=')[1] : '';
+    const tokenTwo =
+      'requiresEmailVerification' in regTwo ? regTwo.devVerificationUrl?.split('token=')[1] : '';
+    expect(tokenOne).toBeTruthy();
+    expect(tokenTwo).toBeTruthy();
+    await service.verifyEmailToken(decodeURIComponent(tokenOne || ''));
+    await service.verifyEmailToken(decodeURIComponent(tokenTwo || ''));
+
+    const result1 = await service.login('user1@test.com', 'password123');
+    const result2 = await service.login('user2@test.com', 'password123');
 
     expect(result1.token).not.toBe(result2.token);
   });

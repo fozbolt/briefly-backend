@@ -17,7 +17,9 @@ describe('Briefly API (e2e)', () => {
   }, 30000);
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   describe('GET /api/health', () => {
@@ -185,26 +187,78 @@ describe('Briefly API (e2e)', () => {
     it('should register a new user', () => {
       return request(app.getHttpServer())
         .post('/api/auth/register')
-        .send({ name: 'E2E Test User', email: `e2e-${Date.now()}@test.com` })
+        .send({
+          name: 'E2E Test User',
+          email: `e2e-${Date.now()}@test.com`,
+          password: 'password123',
+        })
         .expect(201)
         .expect((res: any) => {
-          expect(res.body).toHaveProperty('token');
-          expect(res.body).toHaveProperty('user');
-          expect(res.body.token).toMatch(/^briefly_/);
+          expect(res.body).toHaveProperty('requiresEmailVerification', true);
+          expect(res.body).toHaveProperty('email');
+          expect(res.body).toHaveProperty('verificationExpiresAt');
         });
+    });
+
+    it('should reject duplicate registration', async () => {
+      const email = `dup-${Date.now()}@test.com`;
+      await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ name: 'Duplicate User', email, password: 'password123' })
+        .expect(201);
+
+      return request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ name: 'Duplicate User', email, password: 'password123' })
+        .expect(409);
     });
   });
 
   describe('POST /api/auth/login', () => {
-    it('should login a user', () => {
+    it('should login a user with valid credentials', async () => {
+      const email = `e2e-login-${Date.now()}@test.com`;
+      const password = 'password123';
+      const registerResponse = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ name: 'Login User', email, password })
+        .expect(201);
+      const verificationUrl = registerResponse.body?.devVerificationUrl as string | undefined;
+      const token = verificationUrl?.split('token=')[1];
+      expect(token).toBeDefined();
+
+      await request(app.getHttpServer())
+        .get(`/api/auth/verify-email?token=${token}`)
+        .expect(200);
+
       return request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ email: 'e2e-login@test.com' })
+        .send({ email, password })
         .expect(201)
         .expect((res: any) => {
           expect(res.body).toHaveProperty('token');
           expect(res.body).toHaveProperty('user');
         });
+    });
+
+    it('should reject invalid credentials', () => {
+      return request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: 'does-not-exist@test.com', password: 'password123' })
+        .expect(401);
+    });
+
+    it('should block login until email is verified', async () => {
+      const email = `e2e-unverified-${Date.now()}@test.com`;
+      const password = 'password123';
+      await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ name: 'Unverified User', email, password })
+        .expect(201);
+
+      return request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email, password })
+        .expect(403);
     });
   });
 

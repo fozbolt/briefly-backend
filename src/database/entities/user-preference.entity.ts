@@ -13,7 +13,7 @@ export class UserPreference {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @OneToOne(() => User, (user) => user.preferences)
+  @OneToOne(() => User, (user) => user.preferences, { onDelete: 'CASCADE' })
   @JoinColumn()
   user!: User;
 
@@ -32,7 +32,7 @@ export class UserPreference {
   @Column({ type: 'float', nullable: true, default: null })
   weatherLon!: number;
 
-  @Column({ type: 'varchar', default: 'F' })
+  @Column({ type: 'varchar', length: 1, default: 'F' })
   tempUnit!: string;
 
   @UpdateDateColumn()

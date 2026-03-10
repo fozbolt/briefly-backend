@@ -8,6 +8,11 @@ export default () => ({
     username: process.env.DB_USER || 'root',
     password: process.env.DB_PASS || '',
     name: process.env.DB_NAME || 'briefly_dev',
+    synchronize:
+      process.env.DB_SYNCHRONIZE !== undefined
+        ? process.env.DB_SYNCHRONIZE === 'true'
+        : (process.env.NODE_ENV || 'development') !== 'production' &&
+          (process.env.NODE_ENV || 'development') !== 'stage',
   },
   apis: {
     openWeatherMap: {
@@ -41,5 +46,22 @@ export default () => ({
   llm: {
     baseUrl: process.env.FREE_LLM_BASE || 'https://text.pollinations.ai',
     model: process.env.FREE_LLM_MODEL || 'openai-fast',
+  },
+  auth: {
+    tokenSecret: process.env.AUTH_TOKEN_SECRET || '',
+    tokenTtlHours: parseInt(process.env.AUTH_TOKEN_TTL_HOURS || '720', 10),
+  },
+  email: {
+    provider: process.env.EMAIL_PROVIDER || (process.env.RESEND_API_KEY ? 'resend' : 'console'),
+    resendApiKey: process.env.RESEND_API_KEY || '',
+    from: process.env.EMAIL_FROM || 'Briefly <onboarding@briefly.app>',
+    replyTo: process.env.EMAIL_REPLY_TO || '',
+    verificationBaseUrl:
+      process.env.EMAIL_VERIFICATION_BASE_URL ||
+      `http://localhost:${process.env.PORT || '3000'}/api`,
+    verificationTokenTtlMinutes: parseInt(
+      process.env.EMAIL_VERIFICATION_TOKEN_TTL_MINUTES || '1440',
+      10,
+    ),
   },
 });

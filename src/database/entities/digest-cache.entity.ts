@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 @Entity('digest_cache')
@@ -10,7 +11,7 @@ export class DigestCache {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'varchar', length: 128, unique: true })
   cacheKey!: string;
 
   @Column({ type: 'text' })
@@ -22,6 +23,7 @@ export class DigestCache {
   @CreateDateColumn()
   createdAt!: Date;
 
+  @Index()
   @Column({ type: 'datetime' })
   expiresAt!: Date;
 }
