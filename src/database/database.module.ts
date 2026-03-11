@@ -7,6 +7,7 @@ import { SavedItem } from './entities/saved-item.entity';
 import { DigestCache } from './entities/digest-cache.entity';
 import { ContentItem } from './entities/content-item.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
+import { CacheCleanupService } from './cache-cleanup.service';
 
 const entities = [
   User,
@@ -50,6 +51,7 @@ const entities = [
     }),
     TypeOrmModule.forFeature(entities),
   ],
+  providers: [CacheCleanupService],
   exports: [TypeOrmModule],
 })
 export class DatabaseModule {}
