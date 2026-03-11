@@ -13,6 +13,7 @@ import { Repository } from 'typeorm';
 import { EmailVerificationToken } from '../../database/entities/email-verification-token.entity';
 import { User } from '../../database/entities/user.entity';
 import { AuthMailerService } from './auth-mailer.service';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-request.interface';
 
 const scrypt = promisify(scryptCallback);
 const TOKEN_PREFIX = 'briefly_';
@@ -46,6 +47,14 @@ export type VerifyEmailStatus = 'verified' | 'already_verified' | 'expired' | 'i
 export interface VerifyEmailResult {
   status: VerifyEmailStatus;
   message: string;
+}
+
+interface SessionTokenPayload {
+  sub: string;
+  email: string;
+  iat: number;
+  exp: number;
+  jti: string;
 }
 
 @Injectable()
@@ -315,6 +324,58 @@ export class AuthService {
     return {
       status: 'verified',
       message: 'Email verified successfully. You can login now.',
+    };
+  }
+
+  verifySignedToken(rawToken: string): AuthenticatedUser {
+    const token = (rawToken || '').trim();
+    if (!token.startsWith(TOKEN_PREFIX)) {
+      throw new UnauthorizedException('Invalid token prefix.');
+    }
+
+    const compact = token.slice(TOKEN_PREFIX.length);
+    const [payloadEncoded, signature] = compact.split('.');
+    if (!payloadEncoded || !signature) {
+      throw new UnauthorizedException('Malformed token.');
+    }
+
+    const expectedSignature = createHmac('sha256', this.tokenSecret)
+      .update(payloadEncoded)
+      .digest('base64url');
+
+    const expectedBuffer = Buffer.from(expectedSignature);
+    const providedBuffer = Buffer.from(signature);
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new UnauthorizedException('Invalid token signature.');
+    }
+
+    let payload: SessionTokenPayload;
+    try {
+      payload = JSON.parse(Buffer.from(payloadEncoded, 'base64url').toString('utf8')) as SessionTokenPayload;
+    } catch {
+      throw new UnauthorizedException('Invalid token payload.');
+    }
+
+    if (
+      !payload ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.email !== 'string' ||
+      typeof payload.exp !== 'number'
+    ) {
+      throw new UnauthorizedException('Invalid token claims.');
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (payload.exp <= nowSeconds) {
+      throw new UnauthorizedException('Token expired.');
+    }
+
+    return {
+      id: payload.sub,
+      email: payload.email.toLowerCase(),
     };
   }
 

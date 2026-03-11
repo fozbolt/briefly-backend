@@ -345,4 +345,27 @@ describe('AuthService', () => {
 
     expect(result1.token).not.toBe(result2.token);
   });
+
+  it('should verify signed session token and extract user context', async () => {
+    const registerResult = await service.register('Token User', 'token@test.com', 'password123');
+    const token =
+      'requiresEmailVerification' in registerResult
+        ? registerResult.devVerificationUrl?.split('token=')[1] ?? ''
+        : '';
+    await service.verifyEmailToken(decodeURIComponent(token));
+
+    const loginResult = await service.login('token@test.com', 'password123');
+    const verified = service.verifySignedToken(loginResult.token);
+
+    expect(verified).toEqual({
+      id: loginResult.user.id,
+      email: 'token@test.com',
+    });
+  });
+
+  it('should reject malformed signed token', () => {
+    expect(() => service.verifySignedToken('briefly_invalid.token')).toThrow(
+      UnauthorizedException,
+    );
+  });
 });

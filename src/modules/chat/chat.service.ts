@@ -2,10 +2,19 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { NewsService } from '../news/news.service';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-request.interface';
 
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+export interface ChatClientContext {
+  userName?: string;
+  weather?: Array<{ location?: string; condition?: string; temp?: number; unit?: string }>;
+  signals?: Array<{ title: string; summary?: string }>;
+  tasks?: Array<{ title: string; time?: string }>;
+  digestTab?: string;
 }
 
 const SYSTEM_PROMPT = [
@@ -39,6 +48,8 @@ export class ChatService {
   async sendMessage(
     message: string,
     history: ChatTurn[] = [],
+    _user: AuthenticatedUser,
+    clientContext?: ChatClientContext,
   ): Promise<{ message: string }> {
     const trimmed = message.trim();
     if (!trimmed) {
@@ -46,7 +57,7 @@ export class ChatService {
     }
 
     // Try free LLM first
-    const llmResponse = await this.callFreeLLM(trimmed, history);
+    const llmResponse = await this.callFreeLLM(trimmed, history, clientContext);
     if (llmResponse) {
       return { message: llmResponse };
     }
@@ -58,9 +69,10 @@ export class ChatService {
   private async callFreeLLM(
     userMessage: string,
     history: ChatTurn[],
+    clientContext?: ChatClientContext,
   ): Promise<string | null> {
     try {
-      const prompt = this.buildPrompt(userMessage, history);
+      const prompt = this.buildPrompt(userMessage, history, clientContext);
 
       const response = await axios.get(
         `${this.llmBaseUrl}/${encodeURIComponent(prompt)}`,
@@ -86,7 +98,11 @@ export class ChatService {
     }
   }
 
-  private buildPrompt(userMessage: string, history: ChatTurn[]): string {
+  private buildPrompt(
+    userMessage: string,
+    history: ChatTurn[],
+    clientContext?: ChatClientContext,
+  ): string {
     const normalizedHistory = history
       .filter((item) => item.content.trim().length > 0 && item.role !== 'system')
       .slice(-8);
@@ -99,6 +115,8 @@ export class ChatService {
 
     return [
       `System: ${SYSTEM_PROMPT}`,
+      'Security rule: use only provided conversation/context and never infer or disclose private user identifiers.',
+      clientContext ? `Client context (sanitized): ${JSON.stringify(clientContext)}` : '',
       historyText ? `Conversation:\n${historyText}` : '',
       `User: ${userMessage}`,
       'Assistant:',
