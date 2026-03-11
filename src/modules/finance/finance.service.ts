@@ -8,7 +8,7 @@ import { DigestCache } from '../../database/entities/digest-cache.entity';
 
 const CACHE_TTL_PORTFOLIO = 900; // 15 minutes
 const CACHE_TTL_CRYPTO = 600; // 10 minutes
-const YAHOO_QUOTE_URL = 'https://query1.finance.yahoo.com/v7/finance/quote';
+const YAHOO_CHART_URL = 'https://query2.finance.yahoo.com/v8/finance/chart';
 const DEFAULT_SYMBOLS = ['^GSPC', '^IXIC', 'BTC-USD'];
 
 @Injectable()
@@ -64,23 +64,32 @@ export class FinanceService {
 
   private async fetchYahooQuotes(symbols: string[]): Promise<Stock[]> {
     try {
-      const response = await axios.get(YAHOO_QUOTE_URL, {
-        params: { symbols: symbols.join(',') },
-        timeout: 10000,
-        headers: { 'User-Agent': 'Briefly/1.0' },
-      });
-
-      const results = response.data?.quoteResponse?.result ?? [];
-      const stocks: Stock[] = results.map(
-        (item: { shortName?: string; symbol?: string; regularMarketChangePercent?: number }) => {
-          const pct = item.regularMarketChangePercent ?? 0;
-          return {
-            name: item.shortName ?? item.symbol ?? 'Market',
-            change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
-            positive: pct >= 0,
-          };
-        },
+      const results = await Promise.allSettled(
+        symbols.map((symbol) =>
+          axios.get(`${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}`, {
+            params: { interval: '1d', range: '1d' },
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Briefly/1.0)' },
+          }),
+        ),
       );
+
+      const stocks: Stock[] = [];
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const meta = result.value.data?.chart?.result?.[0]?.meta;
+        if (!meta) continue;
+
+        const price = meta.regularMarketPrice ?? 0;
+        const prevClose = meta.chartPreviousClose ?? price;
+        const pct = prevClose !== 0 ? ((price - prevClose) / prevClose) * 100 : 0;
+
+        stocks.push({
+          name: meta.shortName ?? meta.symbol ?? 'Market',
+          change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
+          positive: pct >= 0,
+        });
+      }
 
       return stocks.length > 0 ? stocks : this.getFallbackStocks();
     } catch (error) {
