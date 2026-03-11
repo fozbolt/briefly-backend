@@ -172,7 +172,7 @@ describe('AuthService', () => {
             get: jest.fn((key: string) => {
               if (key === 'auth.tokenSecret') return 'unit-test-secret';
               if (key === 'auth.tokenTtlHours') return 24;
-              if (key === 'email.verificationBaseUrl') return 'http://localhost:3000/api';
+              if (key === 'email.verificationBaseUrl') return 'http://localhost:3001/api';
               if (key === 'email.verificationTokenTtlMinutes') return 60;
               if (key === 'email.provider') return 'console';
               return undefined;

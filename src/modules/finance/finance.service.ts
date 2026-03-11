@@ -43,7 +43,7 @@ export class FinanceService {
       : 0;
 
     const portfolio: Portfolio = {
-      total: '$42,850.40',
+      total: `Your assets averaged ${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)}% today`,
       change: `${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)}%`,
       stocks,
     };

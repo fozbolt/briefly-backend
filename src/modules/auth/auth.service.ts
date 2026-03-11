@@ -81,7 +81,7 @@ export class AuthService {
 
     const configuredVerificationBase =
       this.configService.get<string>('email.verificationBaseUrl') ||
-      'http://localhost:3000/api';
+      'http://localhost:3001/api';
     this.verificationBaseUrl = configuredVerificationBase.replace(/\/+$/, '');
 
     const configuredVerificationTtl = this.configService.get<number>(

@@ -1,5 +1,5 @@
 export default () => ({
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseInt(process.env.PORT || '3001', 10),
   database: {
     type: process.env.DB_TYPE || 'sqlite', // 'sqlite' or 'mariadb'
     sqlitePath: process.env.DB_SQLITE_PATH || './briefly.db',
@@ -58,7 +58,7 @@ export default () => ({
     replyTo: process.env.EMAIL_REPLY_TO || '',
     verificationBaseUrl:
       process.env.EMAIL_VERIFICATION_BASE_URL ||
-      `http://localhost:${process.env.PORT || '3000'}/api`,
+      `http://localhost:${process.env.PORT || '3001'}/api`,
     verificationTokenTtlMinutes: parseInt(
       process.env.EMAIL_VERIFICATION_TOKEN_TTL_MINUTES || '1440',
       10,
