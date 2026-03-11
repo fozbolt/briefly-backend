@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { FinanceService } from './finance.service';
 import { Portfolio, Stock } from '../../common/interfaces/frontend-types';
 
@@ -7,8 +7,13 @@ export class FinanceController {
   constructor(private readonly financeService: FinanceService) {}
 
   @Get('portfolio')
-  async getPortfolio(): Promise<Portfolio> {
-    return this.financeService.getPortfolio();
+  async getPortfolio(
+    @Query('symbols') symbols?: string,
+  ): Promise<Portfolio> {
+    const symbolList = symbols
+      ? symbols.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+    return this.financeService.getPortfolio(symbolList);
   }
 
   @Get('crypto')

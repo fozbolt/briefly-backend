@@ -6,8 +6,10 @@ import axios from 'axios';
 import { Portfolio, Stock } from '../../common/interfaces/frontend-types';
 import { DigestCache } from '../../database/entities/digest-cache.entity';
 
-const CACHE_TTL_PORTFOLIO = 7200; // 2 hours (Alpha Vantage: 25 calls/day)
+const CACHE_TTL_PORTFOLIO = 900; // 15 minutes
 const CACHE_TTL_CRYPTO = 600; // 10 minutes
+const YAHOO_QUOTE_URL = 'https://query1.finance.yahoo.com/v7/finance/quote';
+const DEFAULT_SYMBOLS = ['^GSPC', '^IXIC', 'BTC-USD'];
 
 @Injectable()
 export class FinanceService {
@@ -25,23 +27,25 @@ export class FinanceService {
     this.coinGeckoUrl = this.configService.get<string>('apis.coinGecko.baseUrl') || '';
   }
 
-  async getPortfolio(): Promise<Portfolio> {
-    const cacheKey = 'finance:portfolio';
+  async getPortfolio(symbols: string[] = []): Promise<Portfolio> {
+    const targetSymbols = symbols.length > 0
+      ? symbols.slice(0, 6).map((s) => s.trim().toUpperCase())
+      : DEFAULT_SYMBOLS;
+
+    const cacheKey = `finance:portfolio:${targetSymbols.join(',')}`;
     const cached = await this.getFromCache<Portfolio>(cacheKey);
     if (cached) return cached;
 
-    const stocks = await this.fetchStockData();
-    const crypto = await this.fetchCryptoData();
+    const stocks = await this.fetchYahooQuotes(targetSymbols);
 
-    const allStocks = [...stocks, ...crypto];
-    const totalChange = allStocks.length > 0
-      ? allStocks.reduce((sum, s) => sum + parseFloat(s.change), 0) / allStocks.length
+    const totalChange = stocks.length > 0
+      ? stocks.reduce((sum, s) => sum + parseFloat(s.change), 0) / stocks.length
       : 0;
 
     const portfolio: Portfolio = {
       total: '$42,850.40',
       change: `${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)}%`,
-      stocks: allStocks,
+      stocks,
     };
 
     await this.saveCache(cacheKey, portfolio, CACHE_TTL_PORTFOLIO);
@@ -58,45 +62,35 @@ export class FinanceService {
     return data;
   }
 
-  private async fetchStockData(): Promise<Stock[]> {
-    if (!this.alphaVantageKey) {
-      return this.getFallbackStocks();
-    }
-
-    const symbols = ['SPY', 'QQQ'];
-    const names: Record<string, string> = { SPY: 'S&P 500', QQQ: 'NASDAQ' };
-
+  private async fetchYahooQuotes(symbols: string[]): Promise<Stock[]> {
     try {
-      const results = await Promise.allSettled(
-        symbols.map((symbol) =>
-          axios.get(this.alphaVantageUrl, {
-            params: { function: 'GLOBAL_QUOTE', symbol, apikey: this.alphaVantageKey },
-            timeout: 10000,
-          }),
-        ),
-      );
-
-      const stocks: Stock[] = [];
-      results.forEach((result, i) => {
-        if (result.status === 'fulfilled') {
-          const quote = result.value.data['Global Quote'];
-          if (quote && quote['10. change percent']) {
-            const changeStr = quote['10. change percent'].replace('%', '');
-            const change = parseFloat(changeStr);
-            stocks.push({
-              name: names[symbols[i]] || symbols[i],
-              change: `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`,
-              positive: change >= 0,
-            });
-          }
-        }
+      const response = await axios.get(YAHOO_QUOTE_URL, {
+        params: { symbols: symbols.join(',') },
+        timeout: 10000,
+        headers: { 'User-Agent': 'Briefly/1.0' },
       });
+
+      const results = response.data?.quoteResponse?.result ?? [];
+      const stocks: Stock[] = results.map(
+        (item: { shortName?: string; symbol?: string; regularMarketChangePercent?: number }) => {
+          const pct = item.regularMarketChangePercent ?? 0;
+          return {
+            name: item.shortName ?? item.symbol ?? 'Market',
+            change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
+            positive: pct >= 0,
+          };
+        },
+      );
 
       return stocks.length > 0 ? stocks : this.getFallbackStocks();
     } catch (error) {
-      console.error('Alpha Vantage error:', (error as Error).message);
+      console.error('Yahoo Finance error:', (error as Error).message);
       return this.getFallbackStocks();
     }
+  }
+
+  private async fetchStockData(): Promise<Stock[]> {
+    return this.fetchYahooQuotes(DEFAULT_SYMBOLS);
   }
 
   private async fetchCryptoData(): Promise<Stock[]> {
