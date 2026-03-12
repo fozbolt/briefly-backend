@@ -26,6 +26,23 @@ export class UserPreference {
   @Column({ type: 'simple-json', nullable: true, default: null })
   trackedAssets!: string[];
 
+  @Column({ type: 'boolean', default: false })
+  priceAlertsEnabled!: boolean;
+
+  @Column({ type: 'float', default: 3 })
+  priceAlertThresholdPercent!: number;
+
+  @Column({ type: 'simple-json', nullable: true, default: null })
+  priceAlertState!: Record<
+    string,
+    {
+      baselinePrice: number;
+      lastPrice: number;
+      lastTriggeredAt?: string | null;
+      lastDirection?: 'up' | 'down' | null;
+    }
+  > | null;
+
   @Column({ type: 'float', nullable: true, default: null })
   weatherLat!: number;
 

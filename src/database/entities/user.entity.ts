@@ -10,6 +10,7 @@ import {
 import { UserPreference } from './user-preference.entity';
 import { SavedItem } from './saved-item.entity';
 import { EmailVerificationToken } from './email-verification-token.entity';
+import { PushDevice } from './push-device.entity';
 
 @Entity('users')
 export class User {
@@ -57,4 +58,7 @@ export class User {
 
   @OneToMany(() => EmailVerificationToken, (token) => token.user, { cascade: ['remove'] })
   emailVerificationTokens!: EmailVerificationToken[];
+
+  @OneToMany(() => PushDevice, (device) => device.user, { cascade: ['remove'] })
+  pushDevices!: PushDevice[];
 }

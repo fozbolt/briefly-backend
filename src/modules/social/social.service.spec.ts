@@ -2,6 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { SocialService } from './social.service';
 import { DigestCache } from '../../database/entities/digest-cache.entity';
+import { fetchRssFeed } from '../../common/helpers/rss-parser.helper';
+
+jest.mock('../../common/helpers/rss-parser.helper', () => ({
+  fetchRssFeed: jest.fn(),
+}));
+
+const mockedFetchRssFeed = fetchRssFeed as jest.MockedFunction<typeof fetchRssFeed>;
 
 describe('SocialService', () => {
   let service: SocialService;
@@ -13,6 +20,28 @@ describe('SocialService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockedFetchRssFeed.mockImplementation(async (url: string) => {
+      if (url.includes('techcrunch')) {
+        return [
+          {
+            title: 'Edge AI becomes mainstream',
+            description: 'Chip vendors are racing to optimize low-power inference on edge devices.',
+            pubDate: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+            link: 'https://example.com/tc-1',
+            creator: '@techcrunch',
+          },
+        ];
+      }
+      return [
+        {
+          title: 'Leadership habits that scale',
+          description: 'Leaders need repeatable communication cadences as teams grow.',
+          pubDate: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+          link: 'https://example.com/hbr-1',
+          creator: 'HBR Editorial',
+        },
+      ];
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SocialService,
@@ -27,7 +56,7 @@ describe('SocialService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should fetch real social pulse from RSS feeds', async () => {
+  it('should fetch social pulse from RSS feeds', async () => {
     const result = await service.getPulse();
 
     expect(result).toBeDefined();
@@ -46,7 +75,8 @@ describe('SocialService', () => {
     expect(result.linkedin).toHaveProperty('author');
     expect(result.linkedin).toHaveProperty('time');
     expect(typeof result.linkedin.text).toBe('string');
-  }, 20000);
+    expect(mockedFetchRssFeed).toHaveBeenCalledTimes(2);
+  });
 
   it('should include time info in social posts', async () => {
     const result = await service.getPulse();
@@ -56,10 +86,10 @@ describe('SocialService', () => {
     expect(result.twitter.time).toMatch(/\d+[smhd] ago/);
     expect(typeof result.linkedin.time).toBe('string');
     expect(result.linkedin.time).toMatch(/\d+[smhd] ago/);
-  }, 20000);
+  });
 
   it('should cache the social pulse', async () => {
     await service.getPulse();
     expect(mockCacheRepo.save).toHaveBeenCalled();
-  }, 20000);
+  });
 });

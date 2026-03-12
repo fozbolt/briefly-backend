@@ -3,6 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NewsService } from './news.service';
 import { DigestCache } from '../../database/entities/digest-cache.entity';
+import { fetchRssFeed } from '../../common/helpers/rss-parser.helper';
+
+jest.mock('../../common/helpers/rss-parser.helper', () => ({
+  fetchRssFeed: jest.fn(),
+}));
+
+const mockedFetchRssFeed = fetchRssFeed as jest.MockedFunction<typeof fetchRssFeed>;
 
 describe('NewsService', () => {
   let service: NewsService;
@@ -30,6 +37,35 @@ describe('NewsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockedFetchRssFeed.mockImplementation(async (url: string) => {
+      if (url.includes('bbci')) {
+        return [
+          {
+            title: 'Global policy summit reaches agreement',
+            description: 'World leaders agreed on a new framework for cooperation.',
+            pubDate: '2026-03-10T08:00:00.000Z',
+            link: 'https://example.com/world-1',
+            creator: 'BBC World',
+          },
+          {
+            title: 'Climate funding expands for coastal cities',
+            description: 'New investment targets resilient infrastructure.',
+            pubDate: '2026-03-10T07:00:00.000Z',
+            link: 'https://example.com/world-2',
+            creator: 'BBC World',
+          },
+        ];
+      }
+      return [
+        {
+          title: 'AI chip startup launches low-power accelerator',
+          description: 'New hardware reduces inference cost in edge devices.',
+          pubDate: '2026-03-10T09:00:00.000Z',
+          link: 'https://example.com/tech-1',
+          creator: 'TechCrunch',
+        },
+      ];
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NewsService,
@@ -45,7 +81,7 @@ describe('NewsService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should fetch real news from RSS feeds', async () => {
+  it('should fetch news from configured RSS feeds', async () => {
     const result = await service.getNews();
 
     expect(Array.isArray(result)).toBe(true);
@@ -61,7 +97,8 @@ describe('NewsService', () => {
       expect(typeof item.title).toBe('string');
       expect(item.title.length).toBeGreaterThan(0);
     }
-  }, 30000);
+    expect(mockedFetchRssFeed).toHaveBeenCalledTimes(2);
+  });
 
   it('should return exactly 3 signals', async () => {
     const result = await service.getSignals();
@@ -79,14 +116,14 @@ describe('NewsService', () => {
     if (result.length > 2) {
       expect(result[2].icon).toBe('🌱');
     }
-  }, 30000);
+  });
 
   it('should cache results', async () => {
     await service.getNews();
 
     // saveCache is called internally
     expect(mockCacheRepo.save).toHaveBeenCalled();
-  }, 30000);
+  });
 
   it('should return cached data when available', async () => {
     const cachedNews = [

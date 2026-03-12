@@ -27,6 +27,10 @@ export default () => ({
       key: process.env.ALPHA_VANTAGE_KEY || '',
       baseUrl: 'https://www.alphavantage.co/query',
     },
+    tomTom: {
+      key: process.env.TOMTOM_API_KEY || '',
+      baseUrl: process.env.TOMTOM_BASE_URL || 'https://api.tomtom.com',
+    },
     coinGecko: {
       baseUrl: 'https://api.coingecko.com/api/v3',
     },
@@ -46,6 +50,16 @@ export default () => ({
   llm: {
     baseUrl: process.env.FREE_LLM_BASE || 'https://text.pollinations.ai',
     model: process.env.FREE_LLM_MODEL || 'openai-fast',
+  },
+  priceAlerts: {
+    enabled:
+      process.env.PRICE_ALERTS_ENABLED !== undefined
+        ? process.env.PRICE_ALERTS_ENABLED === 'true'
+        : (process.env.NODE_ENV || 'development') !== 'test',
+    pollIntervalMs: parseInt(process.env.PRICE_ALERT_POLL_INTERVAL_MS || '300000', 10),
+    defaultThresholdPercent: parseFloat(process.env.PRICE_ALERT_DEFAULT_THRESHOLD_PERCENT || '3'),
+    expoPushUrl: process.env.EXPO_PUSH_URL || 'https://exp.host/--/api/v2/push/send',
+    expoAccessToken: process.env.EXPO_ACCESS_TOKEN || '',
   },
   auth: {
     tokenSecret: process.env.AUTH_TOKEN_SECRET || '',

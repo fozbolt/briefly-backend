@@ -5,6 +5,41 @@ import { AppModule } from '../src/app.module';
 
 describe('Briefly API (e2e)', () => {
   let app: INestApplication;
+  const api = () => request(app.getHttpServer());
+
+  const extractVerificationToken = (responseBody: any): string => {
+    const verificationUrl = responseBody?.devVerificationUrl as string | undefined;
+    const token = verificationUrl?.split('token=')[1];
+    if (!token) {
+      throw new Error('Missing dev verification token in register response');
+    }
+    return token;
+  };
+
+  const createVerifiedSession = async (): Promise<{ email: string; password: string; token: string }> => {
+    const email = `e2e-chat-${Date.now()}-${Math.floor(Math.random() * 10000)}@test.com`;
+    const password = 'password123';
+    const registerResponse = await api()
+      .post('/api/auth/register')
+      .send({ name: 'Chat User', email, password })
+      .expect(201);
+
+    const verificationToken = extractVerificationToken(registerResponse.body);
+    await api()
+      .get(`/api/auth/verify-email?token=${verificationToken}`)
+      .expect(200);
+
+    const loginResponse = await api()
+      .post('/api/auth/login')
+      .send({ email, password })
+      .expect(201);
+
+    return {
+      email,
+      password,
+      token: loginResponse.body.token,
+    };
+  };
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -14,6 +49,7 @@ describe('Briefly API (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api');
     await app.init();
+    await app.listen(0);
   }, 30000);
 
   afterAll(async () => {
@@ -24,7 +60,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/health', () => {
     it('should return ok status', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/health')
         .expect(200)
         .expect((res: any) => {
@@ -36,7 +72,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/weather', () => {
     it('should return weather data', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/weather?lat=40.71&lon=-74.00')
         .expect(200)
         .expect((res: any) => {
@@ -51,7 +87,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/news', () => {
     it('should return news array', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/news')
         .expect(200)
         .expect((res: any) => {
@@ -62,7 +98,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/news/signals', () => {
     it('should return top 3 signals', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/news/signals')
         .expect(200)
         .expect((res: any) => {
@@ -74,7 +110,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/finance/portfolio', () => {
     it('should return portfolio with stocks', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/finance/portfolio')
         .expect(200)
         .expect((res: any) => {
@@ -88,7 +124,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/finance/crypto', () => {
     it('should return crypto data', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/finance/crypto')
         .expect(200)
         .expect((res: any) => {
@@ -99,7 +135,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/content/books', () => {
     it('should return a book recommendation', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/content/books')
         .expect(200)
         .expect((res: any) => {
@@ -112,7 +148,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/content/career-tips', () => {
     it('should return a career tip', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/content/career-tips')
         .expect(200)
         .expect((res: any) => {
@@ -125,7 +161,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/content/quotes', () => {
     it('should return a daily quote', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/content/quotes')
         .expect(200)
         .expect((res: any) => {
@@ -137,7 +173,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/content/recommendations', () => {
     it('should return recommendations array', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/content/recommendations')
         .expect(200)
         .expect((res: any) => {
@@ -153,7 +189,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/social/pulse', () => {
     it('should return social pulse', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/social/pulse')
         .expect(200)
         .expect((res: any) => {
@@ -165,7 +201,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('GET /api/digest', () => {
     it('should return full digest', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/digest?lat=40.71&lon=-74.00')
         .expect(200)
         .expect((res: any) => {
@@ -185,7 +221,7 @@ describe('Briefly API (e2e)', () => {
 
   describe('POST /api/auth/register', () => {
     it('should register a new user', () => {
-      return request(app.getHttpServer())
+      return api()
         .post('/api/auth/register')
         .send({
           name: 'E2E Test User',
@@ -200,16 +236,38 @@ describe('Briefly API (e2e)', () => {
         });
     });
 
-    it('should reject duplicate registration', async () => {
+    it('should return verification flow for duplicate unverified registration', async () => {
       const email = `dup-${Date.now()}@test.com`;
-      await request(app.getHttpServer())
+      await api()
         .post('/api/auth/register')
         .send({ name: 'Duplicate User', email, password: 'password123' })
         .expect(201);
 
-      return request(app.getHttpServer())
+      return api()
         .post('/api/auth/register')
         .send({ name: 'Duplicate User', email, password: 'password123' })
+        .expect(201)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('requiresEmailVerification', true);
+          expect(res.body).toHaveProperty('email', email.toLowerCase());
+        });
+    });
+
+    it('should reject duplicate registration after email is verified', async () => {
+      const email = `dup-verified-${Date.now()}@test.com`;
+      const registerResponse = await api()
+        .post('/api/auth/register')
+        .send({ name: 'Duplicate Verified User', email, password: 'password123' })
+        .expect(201);
+
+      const verificationToken = extractVerificationToken(registerResponse.body);
+      await api()
+        .get(`/api/auth/verify-email?token=${verificationToken}`)
+        .expect(200);
+
+      return api()
+        .post('/api/auth/register')
+        .send({ name: 'Duplicate Verified User', email, password: 'password123' })
         .expect(409);
     });
   });
@@ -218,19 +276,17 @@ describe('Briefly API (e2e)', () => {
     it('should login a user with valid credentials', async () => {
       const email = `e2e-login-${Date.now()}@test.com`;
       const password = 'password123';
-      const registerResponse = await request(app.getHttpServer())
+      const registerResponse = await api()
         .post('/api/auth/register')
         .send({ name: 'Login User', email, password })
         .expect(201);
-      const verificationUrl = registerResponse.body?.devVerificationUrl as string | undefined;
-      const token = verificationUrl?.split('token=')[1];
-      expect(token).toBeDefined();
+      const token = extractVerificationToken(registerResponse.body);
 
-      await request(app.getHttpServer())
+      await api()
         .get(`/api/auth/verify-email?token=${token}`)
         .expect(200);
 
-      return request(app.getHttpServer())
+      return api()
         .post('/api/auth/login')
         .send({ email, password })
         .expect(201)
@@ -241,7 +297,7 @@ describe('Briefly API (e2e)', () => {
     });
 
     it('should reject invalid credentials', () => {
-      return request(app.getHttpServer())
+      return api()
         .post('/api/auth/login')
         .send({ email: 'does-not-exist@test.com', password: 'password123' })
         .expect(401);
@@ -250,12 +306,12 @@ describe('Briefly API (e2e)', () => {
     it('should block login until email is verified', async () => {
       const email = `e2e-unverified-${Date.now()}@test.com`;
       const password = 'password123';
-      await request(app.getHttpServer())
+      await api()
         .post('/api/auth/register')
         .send({ name: 'Unverified User', email, password })
         .expect(201);
 
-      return request(app.getHttpServer())
+      return api()
         .post('/api/auth/login')
         .send({ email, password })
         .expect(403);
@@ -263,9 +319,11 @@ describe('Briefly API (e2e)', () => {
   });
 
   describe('POST /api/chat/bri', () => {
-    it('should respond to chat messages', () => {
-      return request(app.getHttpServer())
+    it('should respond to chat messages', async () => {
+      const session = await createVerifiedSession();
+      return api()
         .post('/api/chat/bri')
+        .set('Authorization', `Bearer ${session.token}`)
         .send({ message: 'What are the top news?' })
         .expect(201)
         .expect((res: any) => {
@@ -274,9 +332,11 @@ describe('Briefly API (e2e)', () => {
         });
     }, 30000);
 
-    it('should accept conversation history', () => {
-      return request(app.getHttpServer())
+    it('should accept conversation history', async () => {
+      const session = await createVerifiedSession();
+      return api()
         .post('/api/chat/bri')
+        .set('Authorization', `Bearer ${session.token}`)
         .send({
           message: 'Tell me more',
           history: [
@@ -292,9 +352,67 @@ describe('Briefly API (e2e)', () => {
     }, 30000);
   });
 
+  describe('Authenticated price alert endpoints', () => {
+    it('stores alert settings and device registrations for the logged-in user', async () => {
+      const session = await createVerifiedSession();
+      const expoPushToken = `ExponentPushToken[e2e-${Date.now()}]`;
+
+      await api()
+        .post('/api/alerts/price/device')
+        .set('Authorization', `Bearer ${session.token}`)
+        .send({ expoPushToken, platform: 'ios' })
+        .expect(201)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('registered', true);
+          expect(res.body).toHaveProperty('devices', 1);
+        });
+
+      await api()
+        .put('/api/alerts/price')
+        .set('Authorization', `Bearer ${session.token}`)
+        .send({
+          enabled: true,
+          thresholdPercent: 4,
+          trackedAssets: ['aapl', 'NVDA'],
+        })
+        .expect(200)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('enabled', true);
+          expect(res.body).toHaveProperty('thresholdPercent', 4);
+          expect(res.body.trackedAssets).toEqual(['AAPL', 'NVDA']);
+          expect(res.body).toHaveProperty('devicesRegistered', 1);
+        });
+
+      await api()
+        .get('/api/alerts/price')
+        .set('Authorization', `Bearer ${session.token}`)
+        .expect(200)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('enabled', true);
+          expect(res.body.trackedAssets).toEqual(['AAPL', 'NVDA']);
+        });
+
+      await api()
+        .delete('/api/alerts/price/device')
+        .set('Authorization', `Bearer ${session.token}`)
+        .send({ expoPushToken })
+        .expect(200)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('removed', true);
+          expect(res.body).toHaveProperty('devices', 0);
+        });
+    });
+
+    it('rejects unauthenticated access', () => {
+      return api()
+        .get('/api/alerts/price')
+        .expect(401);
+    });
+  });
+
   describe('GET /api/listen/narration', () => {
     it('should return narration payload', () => {
-      return request(app.getHttpServer())
+      return api()
         .get('/api/listen/narration?userName=TestUser')
         .expect(200)
         .expect((res: any) => {

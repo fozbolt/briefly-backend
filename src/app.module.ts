@@ -12,6 +12,8 @@ import { DigestModule } from './modules/digest/digest.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ListenModule } from './modules/listen/listen.module';
+import { TrafficModule } from './modules/traffic/traffic.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 
 @Module({
   imports: [
@@ -29,6 +31,8 @@ import { ListenModule } from './modules/listen/listen.module';
     AuthModule,
     ChatModule,
     ListenModule,
+    TrafficModule,
+    AlertsModule,
   ],
   controllers: [AppController],
 })

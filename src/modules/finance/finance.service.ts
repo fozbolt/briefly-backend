@@ -11,6 +11,14 @@ const CACHE_TTL_CRYPTO = 600; // 10 minutes
 const YAHOO_CHART_URL = 'https://query2.finance.yahoo.com/v8/finance/chart';
 const DEFAULT_SYMBOLS = ['^GSPC', '^IXIC', 'BTC-USD'];
 
+export interface QuoteSnapshot {
+  symbol: string;
+  name: string;
+  price: number;
+  previousClose: number;
+  changePercent: number;
+}
+
 @Injectable()
 export class FinanceService {
   private readonly alphaVantageKey: string;
@@ -36,7 +44,11 @@ export class FinanceService {
     const cached = await this.getFromCache<Portfolio>(cacheKey);
     if (cached) return cached;
 
-    const stocks = await this.fetchYahooQuotes(targetSymbols);
+    const stocks = (await this.fetchYahooQuoteSnapshots(targetSymbols)).map((snapshot) => ({
+      name: snapshot.name,
+      change: `${snapshot.changePercent >= 0 ? '+' : ''}${snapshot.changePercent.toFixed(2)}%`,
+      positive: snapshot.changePercent >= 0,
+    }));
 
     const totalChange = stocks.length > 0
       ? stocks.reduce((sum, s) => sum + parseFloat(s.change), 0) / stocks.length
@@ -62,7 +74,15 @@ export class FinanceService {
     return data;
   }
 
-  private async fetchYahooQuotes(symbols: string[]): Promise<Stock[]> {
+  async getQuoteSnapshots(symbols: string[] = []): Promise<QuoteSnapshot[]> {
+    const targetSymbols = symbols.length > 0
+      ? Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))).slice(0, 50)
+      : DEFAULT_SYMBOLS;
+
+    return this.fetchYahooQuoteSnapshots(targetSymbols);
+  }
+
+  private async fetchYahooQuoteSnapshots(symbols: string[]): Promise<QuoteSnapshot[]> {
     try {
       const results = await Promise.allSettled(
         symbols.map((symbol) =>
@@ -74,7 +94,7 @@ export class FinanceService {
         ),
       );
 
-      const stocks: Stock[] = [];
+      const snapshots: QuoteSnapshot[] = [];
       for (const result of results) {
         if (result.status !== 'fulfilled') continue;
         const meta = result.value.data?.chart?.result?.[0]?.meta;
@@ -84,22 +104,28 @@ export class FinanceService {
         const prevClose = meta.chartPreviousClose ?? price;
         const pct = prevClose !== 0 ? ((price - prevClose) / prevClose) * 100 : 0;
 
-        stocks.push({
+        snapshots.push({
+          symbol: String(meta.symbol ?? meta.exchangeName ?? meta.shortName ?? 'MARKET').toUpperCase(),
           name: meta.shortName ?? meta.symbol ?? 'Market',
-          change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
-          positive: pct >= 0,
+          price,
+          previousClose: prevClose,
+          changePercent: pct,
         });
       }
 
-      return stocks.length > 0 ? stocks : this.getFallbackStocks();
+      return snapshots;
     } catch (error) {
       console.error('Yahoo Finance error:', (error as Error).message);
-      return this.getFallbackStocks();
+      return [];
     }
   }
 
   private async fetchStockData(): Promise<Stock[]> {
-    return this.fetchYahooQuotes(DEFAULT_SYMBOLS);
+    return (await this.fetchYahooQuoteSnapshots(DEFAULT_SYMBOLS)).map((snapshot) => ({
+      name: snapshot.name,
+      change: `${snapshot.changePercent >= 0 ? '+' : ''}${snapshot.changePercent.toFixed(2)}%`,
+      positive: snapshot.changePercent >= 0,
+    }));
   }
 
   private async fetchCryptoData(): Promise<Stock[]> {
