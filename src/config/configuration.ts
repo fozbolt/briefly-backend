@@ -94,6 +94,10 @@ export default () => ({
       process.env.FACEBOOK_SCOPES ||
       process.env.EXPO_PUBLIC_FACEBOOK_SCOPES ||
       '',
+    linkedinClientId:
+      process.env.LINKEDIN_OAUTH_CLIENT_ID || '',
+    linkedinClientSecret:
+      process.env.LINKEDIN_OAUTH_CLIENT_SECRET || '',
   },
   email: {
     provider: process.env.EMAIL_PROVIDER || (process.env.RESEND_API_KEY ? 'resend' : 'console'),
