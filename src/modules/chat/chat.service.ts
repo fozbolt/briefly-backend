@@ -15,6 +15,42 @@ export interface ChatClientContext {
   signals?: Array<{ title: string; summary?: string }>;
   tasks?: Array<{ title: string; time?: string }>;
   digestTab?: string;
+  finance?: {
+    total?: string;
+    change?: string;
+    stocks?: Array<{ name: string; change: string; positive: boolean }>;
+  };
+  recommendations?: Array<{ title?: string; summary?: string }>;
+  socialPulse?: {
+    twitter?: Array<{ author?: string; text?: string; time?: string }>;
+    linkedin?: Array<{ author?: string; text?: string; time?: string }>;
+  };
+  emailSummaries?: Array<{ sender?: string; title?: string }>;
+  unreadMessages?: Array<{ platform?: string; sender?: string; preview?: string }>;
+  wisdom?: { quote?: string; author?: string; category?: string } | null;
+  fact?: { title?: string; body?: string } | null;
+  learning?: {
+    bookTitle?: string;
+    careerTipTitle?: string;
+  } | null;
+  settings?: {
+    language?: string;
+    temperatureUnit?: string;
+    weatherLocations?: string[];
+    commuteRouteConfigured?: boolean;
+    digestSchedule?: Array<{ name?: string; time?: string; enabled?: boolean }>;
+    integrations?: Record<string, boolean>;
+    activeNewsCategories?: Array<{ id?: string; name?: string; quantity?: number }>;
+    focusAreas?: string[];
+    focusSubcategories?: string[];
+    quoteCategories?: string[];
+    factCategories?: string[];
+    quoteCount?: number;
+    factCount?: number;
+    portfolioSymbols?: string[];
+    socialPulseCounts?: { twitter?: number; linkedin?: number };
+    enabledWidgets?: string[];
+  };
 }
 
 const SYSTEM_PROMPT = [
@@ -23,6 +59,8 @@ const SYSTEM_PROMPT = [
   'Answer any user question helpfully, accurately, and concisely.',
   'Be concise by default unless the user asks for depth.',
   'When the user asks about their digest, news, finance, weather, or schedule, give helpful context-aware answers.',
+  'When client context is present, you can use those sanitized preferences and selected items directly.',
+  'Do not claim that you lack access to preferences, selected categories, or digest content if they are present in context.',
   'Use emoji sparingly for section headers if it helps readability.',
 ].join(' ');
 
@@ -116,6 +154,7 @@ export class ChatService {
     return [
       `System: ${SYSTEM_PROMPT}`,
       'Security rule: use only provided conversation/context and never infer or disclose private user identifiers.',
+      'If the user asks what you can access, answer from the provided sanitized context and avoid saying you have no access when context exists.',
       clientContext ? `Client context (sanitized): ${JSON.stringify(clientContext)}` : '',
       historyText ? `Conversation:\n${historyText}` : '',
       `User: ${userMessage}`,

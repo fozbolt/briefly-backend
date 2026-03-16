@@ -150,6 +150,11 @@ describe('AuthService', () => {
       provider: 'console' as const,
       verificationUrl,
     })),
+    sendPasswordResetEmail: jest.fn(async ({ resetUrl }: any) => ({
+      delivered: true,
+      provider: 'console' as const,
+      resetUrl,
+    })),
   };
 
   beforeEach(async () => {
@@ -322,6 +327,16 @@ describe('AuthService', () => {
     expect(result.user.fullName).toBe('Google');
   });
 
+  it('should use real provider profile information when available', async () => {
+    const result = await service.oauthLogin('google', 'auth-code-123', {
+      email: 'filip@gmail.com',
+      fullName: 'Filip Ozbolt',
+    });
+
+    expect(result.user.email).toBe('filip@gmail.com');
+    expect(result.user.fullName).toBe('Filip Ozbolt');
+  });
+
   it('should reject unknown OAuth providers', async () => {
     await expect(service.oauthLogin('unsupported', 'auth-code-123')).rejects.toBeInstanceOf(
       BadRequestException,
@@ -367,5 +382,37 @@ describe('AuthService', () => {
     expect(() => service.verifySignedToken('briefly_invalid.token')).toThrow(
       UnauthorizedException,
     );
+  });
+
+  it('should issue a password reset link for local verified users', async () => {
+    const registerResult = await service.register('Reset User', 'reset@test.com', 'password123');
+    const token =
+      'requiresEmailVerification' in registerResult
+        ? registerResult.devVerificationUrl?.split('token=')[1] ?? ''
+        : '';
+    await service.verifyEmailToken(decodeURIComponent(token));
+
+    const result = await service.requestPasswordReset('reset@test.com');
+
+    expect(result.message).toContain('If an account exists');
+    expect(result.devResetUrl).toContain('/auth/reset-password?token=');
+    expect(mockMailerService.sendPasswordResetEmail).toHaveBeenCalled();
+  });
+
+  it('should reset password with a valid token', async () => {
+    const registerResult = await service.register('Reset User', 'reset2@test.com', 'password123');
+    const verificationToken =
+      'requiresEmailVerification' in registerResult
+        ? registerResult.devVerificationUrl?.split('token=')[1] ?? ''
+        : '';
+    await service.verifyEmailToken(decodeURIComponent(verificationToken));
+
+    const resetRequest = await service.requestPasswordReset('reset2@test.com');
+    const resetToken = resetRequest.devResetUrl?.split('token=')[1] ?? '';
+    expect(resetToken).toBeTruthy();
+
+    await service.resetPassword(decodeURIComponent(resetToken), 'new-password-123');
+    const loginResult = await service.login('reset2@test.com', 'new-password-123');
+    expect(loginResult.user.email).toBe('reset2@test.com');
   });
 });

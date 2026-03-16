@@ -17,7 +17,7 @@ export interface CommuteTrafficSnapshot {
   summary: string;
   chipLabel: string;
   trafficLevel: TrafficLevel;
-  source: 'tomtom' | 'osrm' | 'none';
+  source: 'tomtom' | 'osrm' | 'heuristic' | 'none';
   requiresRouteConfiguration: boolean;
 }
 
@@ -29,6 +29,21 @@ interface Coordinate {
 interface NominatimResult {
   lat?: string;
   lon?: string;
+}
+
+interface OpenMeteoGeocodeResponse {
+  results?: Array<{
+    latitude?: number;
+    longitude?: number;
+  }>;
+}
+
+interface PhotonGeocodeResponse {
+  features?: Array<{
+    geometry?: {
+      coordinates?: [number, number];
+    };
+  }>;
 }
 
 interface TomTomRouteResponse {
@@ -50,8 +65,8 @@ interface OsrmRouteResponse {
 }
 
 const CACHE_TTL_SECONDS = 60;
-const GEOCODE_TIMEOUT_MS = 2500;
-const ROUTE_TIMEOUT_MS = 3500;
+const GEOCODE_TIMEOUT_MS = 4000;
+const ROUTE_TIMEOUT_MS = 5000;
 const NOMINATIM_USER_AGENT = 'briefly-backend/1.0 (contact: support@briefly.app)';
 
 @Injectable()
@@ -210,7 +225,7 @@ export class TrafficService {
       );
       const route = response.data.routes?.[0];
       if (!route?.duration) {
-        return null;
+        return this.buildHeuristicEstimate(origin, destination, originCoords, destinationCoords);
       }
       const durationMinutes = this.toMinutes(route.duration);
       const routeLabel = this.formatRouteLabel(origin, destination);
@@ -223,38 +238,100 @@ export class TrafficService {
         requiresRouteConfiguration: false,
       };
     } catch {
-      return null;
+      return this.buildHeuristicEstimate(origin, destination, originCoords, destinationCoords);
     }
   }
 
   private async geocode(query: string): Promise<Coordinate | null> {
-    try {
-      const response = await axios.get<NominatimResult[]>(
-        'https://nominatim.openstreetmap.org/search',
-        {
+    for (const candidate of this.buildGeocodeQueries(query)) {
+      try {
+        const openMeteo = await axios.get<OpenMeteoGeocodeResponse>(
+          'https://geocoding-api.open-meteo.com/v1/search',
+          {
+            params: {
+              name: candidate,
+              count: 1,
+              language: 'en',
+              format: 'json',
+            },
+            timeout: GEOCODE_TIMEOUT_MS,
+          },
+        );
+        const first = openMeteo.data.results?.[0];
+        const lat = Number(first?.latitude ?? NaN);
+        const lon = Number(first?.longitude ?? NaN);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          return { lat, lon };
+        }
+      } catch {
+        // try the next source
+      }
+
+      try {
+        const response = await axios.get<NominatimResult[]>(
+          'https://nominatim.openstreetmap.org/search',
+          {
+            params: {
+              q: candidate,
+              format: 'jsonv2',
+              limit: 1,
+            },
+            headers: {
+              'User-Agent': NOMINATIM_USER_AGENT,
+              'Accept-Language': 'en',
+            },
+            timeout: GEOCODE_TIMEOUT_MS,
+          },
+        );
+
+        const first = response.data[0];
+        const lat = Number(first?.lat ?? NaN);
+        const lon = Number(first?.lon ?? NaN);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          return { lat, lon };
+        }
+      } catch {
+        // try next query
+      }
+
+      try {
+        const photon = await axios.get<PhotonGeocodeResponse>('https://photon.komoot.io/api/', {
           params: {
-            q: query,
-            format: 'jsonv2',
+            q: candidate,
             limit: 1,
           },
-          headers: {
-            'User-Agent': NOMINATIM_USER_AGENT,
-            'Accept-Language': 'en',
-          },
           timeout: GEOCODE_TIMEOUT_MS,
-        },
-      );
+        });
 
-      const first = response.data[0];
-      const lat = Number(first?.lat ?? NaN);
-      const lon = Number(first?.lon ?? NaN);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        return null;
+        const coordinates = photon.data.features?.[0]?.geometry?.coordinates;
+        const lon = Number(coordinates?.[0] ?? NaN);
+        const lat = Number(coordinates?.[1] ?? NaN);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          return { lat, lon };
+        }
+      } catch {
+        // try next query
       }
-      return { lat, lon };
-    } catch {
-      return null;
     }
+
+    return null;
+  }
+
+  private buildGeocodeQueries(query: string): string[] {
+    const trimmed = query.trim().replace(/\s+/g, ' ');
+    if (!trimmed) {
+      return [];
+    }
+
+    const deAccented = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const withoutPostal = trimmed.replace(/\b\d{4,6}\b/g, ' ').replace(/\s+/g, ' ').trim();
+    const asciiWithoutPostal = withoutPostal
+      ? withoutPostal.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      : '';
+
+    return [trimmed, withoutPostal, deAccented, asciiWithoutPostal].filter(
+      (value, index, list) => value.length > 0 && list.indexOf(value) === index,
+    );
   }
 
   private classifyByDelay(delayRatio: number): TrafficLevel {
@@ -269,6 +346,49 @@ export class TrafficService {
 
   private toMinutes(seconds: number): number {
     return Math.max(1, Math.round(seconds / 60));
+  }
+
+  private toRadians(value: number): number {
+    return (value * Math.PI) / 180;
+  }
+
+  private haversineKm(left: Coordinate, right: Coordinate): number {
+    const earthRadiusKm = 6371;
+    const dLat = this.toRadians(right.lat - left.lat);
+    const dLon = this.toRadians(right.lon - left.lon);
+    const lat1 = this.toRadians(left.lat);
+    const lat2 = this.toRadians(right.lat);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  private estimateDriveMinutesFromDistance(distanceKm: number): number {
+    const roadMultiplier = distanceKm < 10 ? 1.5 : distanceKm < 40 ? 1.35 : 1.25;
+    const adjustedKm = Math.max(1, distanceKm * roadMultiplier);
+    const averageSpeedKmh =
+      distanceKm < 8 ? 28 : distanceKm < 25 ? 42 : distanceKm < 100 ? 65 : 85;
+    return Math.max(5, Math.round((adjustedKm / averageSpeedKmh) * 60));
+  }
+
+  private buildHeuristicEstimate(
+    origin: string,
+    destination: string,
+    originCoords: Coordinate,
+    destinationCoords: Coordinate,
+  ): CommuteTrafficSnapshot {
+    const routeLabel = this.formatRouteLabel(origin, destination);
+    const distanceKm = this.haversineKm(originCoords, destinationCoords);
+    const durationMinutes = this.estimateDriveMinutesFromDistance(distanceKm);
+    return {
+      routeLabel,
+      summary: `Estimated commute time based on route distance (${durationMinutes} min).`,
+      chipLabel: `${durationMinutes}m • Estimate`,
+      trafficLevel: 'Estimated drive time',
+      source: 'heuristic',
+      requiresRouteConfiguration: false,
+    };
   }
 
   private formatRouteLabel(origin: string, destination: string): string {

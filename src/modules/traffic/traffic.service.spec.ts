@@ -64,8 +64,8 @@ describe('TrafficService', () => {
   it('falls back to OSRM estimate when no TomTom key is configured', async () => {
     const mockedAxios = axios as jest.Mocked<typeof axios>;
     mockedAxios.get
-      .mockResolvedValueOnce({ data: [{ lat: '46.0569', lon: '14.5058' }] })
-      .mockResolvedValueOnce({ data: [{ lat: '46.1199', lon: '14.8153' }] })
+      .mockResolvedValueOnce({ data: { results: [{ latitude: 46.0569, longitude: 14.5058 }] } })
+      .mockResolvedValueOnce({ data: { results: [{ latitude: 46.1199, longitude: 14.8153 }] } })
       .mockResolvedValueOnce({
         data: {
           routes: [{ duration: 2100, distance: 25000 }],
@@ -76,5 +76,18 @@ describe('TrafficService', () => {
     expect(result.source).toBe('osrm');
     expect(result.trafficLevel).toBe('Estimated drive time');
     expect(result.chipLabel).toContain('Estimate');
+  });
+
+  it('falls back to heuristic estimate when routing fails after geocoding succeeds', async () => {
+    const mockedAxios = axios as jest.Mocked<typeof axios>;
+    mockedAxios.get
+      .mockResolvedValueOnce({ data: { results: [{ latitude: 46.0569, longitude: 14.5058 }] } })
+      .mockResolvedValueOnce({ data: { results: [{ latitude: 46.1199, longitude: 14.8153 }] } })
+      .mockRejectedValueOnce(new Error('OSRM unavailable'));
+
+    const result = await service.estimateTraffic('Ljubljana', 'Novo mesto');
+    expect(result.source).toBe('heuristic');
+    expect(result.trafficLevel).toBe('Estimated drive time');
+    expect(result.summary).toContain('Estimated commute time based on route distance');
   });
 });

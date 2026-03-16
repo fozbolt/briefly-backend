@@ -70,6 +70,22 @@ describe('Briefly API (e2e)', () => {
     });
   });
 
+  describe('GET /api/public/app-config', () => {
+    it('should return public oauth and traffic config', () => {
+      return api()
+        .get('/api/public/app-config')
+        .expect(200)
+        .expect((res: any) => {
+          expect(res.body).toHaveProperty('oauth');
+          expect(res.body).toHaveProperty('traffic');
+          expect(res.body.oauth).toHaveProperty('googleClientId');
+          expect(res.body.oauth).toHaveProperty('microsoftClientId');
+          expect(res.body.traffic).toHaveProperty('provider');
+          expect(res.body.traffic).toHaveProperty('liveTrafficEnabled');
+        });
+    });
+  });
+
   describe('GET /api/weather', () => {
     it('should return weather data', () => {
       return api()

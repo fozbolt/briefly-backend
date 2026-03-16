@@ -65,6 +65,36 @@ export default () => ({
     tokenSecret: process.env.AUTH_TOKEN_SECRET || '',
     tokenTtlHours: parseInt(process.env.AUTH_TOKEN_TTL_HOURS || '720', 10),
   },
+  oauth: {
+    googleClientId:
+      process.env.GOOGLE_OAUTH_CLIENT_ID ||
+      process.env.EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID ||
+      '',
+    microsoftClientId:
+      process.env.MICROSOFT_OAUTH_CLIENT_ID ||
+      process.env.EXPO_PUBLIC_MICROSOFT_OAUTH_CLIENT_ID ||
+      '',
+    microsoftTenantId:
+      process.env.MICROSOFT_TENANT_ID ||
+      process.env.EXPO_PUBLIC_MICROSOFT_TENANT_ID ||
+      'common',
+    slackClientId:
+      process.env.SLACK_CLIENT_ID ||
+      process.env.EXPO_PUBLIC_SLACK_CLIENT_ID ||
+      '',
+    slackScopes:
+      process.env.SLACK_SCOPES ||
+      process.env.EXPO_PUBLIC_SLACK_SCOPES ||
+      '',
+    facebookAppId:
+      process.env.FACEBOOK_APP_ID ||
+      process.env.EXPO_PUBLIC_FACEBOOK_APP_ID ||
+      '',
+    facebookScopes:
+      process.env.FACEBOOK_SCOPES ||
+      process.env.EXPO_PUBLIC_FACEBOOK_SCOPES ||
+      '',
+  },
   email: {
     provider: process.env.EMAIL_PROVIDER || (process.env.RESEND_API_KEY ? 'resend' : 'console'),
     resendApiKey: process.env.RESEND_API_KEY || '',

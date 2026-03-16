@@ -18,6 +18,7 @@ import { AlertsModule } from './modules/alerts/alerts.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
+      envFilePath: '.env',
       load: [configuration],
       isGlobal: true,
     }),

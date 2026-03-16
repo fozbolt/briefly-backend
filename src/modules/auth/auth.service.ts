@@ -17,8 +17,10 @@ import type { AuthenticatedUser } from '../../common/interfaces/authenticated-re
 
 const scrypt = promisify(scryptCallback);
 const TOKEN_PREFIX = 'briefly_';
+const RESET_TOKEN_PREFIX = 'briefly_reset_';
 const ALLOWED_OAUTH_PROVIDERS = new Set([
   'google',
+  'apple',
   'gmail',
   'outlook',
   'slack',
@@ -55,6 +57,19 @@ interface SessionTokenPayload {
   iat: number;
   exp: number;
   jti: string;
+}
+
+interface PasswordResetTokenPayload {
+  sub: string;
+  email: string;
+  fp: string;
+  exp: number;
+  purpose: 'password-reset';
+}
+
+interface OAuthProfileInput {
+  email?: string;
+  fullName?: string;
 }
 
 @Injectable()
@@ -200,7 +215,11 @@ export class AuthService {
     return this.buildSessionResponse(user);
   }
 
-  async oauthLogin(provider: string, deviceAuthCode: string): Promise<SessionAuthResponse> {
+  async oauthLogin(
+    provider: string,
+    deviceAuthCode: string,
+    profile: OAuthProfileInput = {},
+  ): Promise<SessionAuthResponse> {
     const normalizedProvider = provider.trim().toLowerCase();
     if (!ALLOWED_OAUTH_PROVIDERS.has(normalizedProvider)) {
       throw new BadRequestException('Unsupported OAuth provider.');
@@ -209,12 +228,35 @@ export class AuthService {
       throw new BadRequestException('Invalid OAuth authorization code.');
     }
 
-    const email = `demo-${normalizedProvider}@briefly.app`;
-    let user = await this.userRepo.findOne({ where: { email } });
+    const normalizedEmail = profile.email ? this.normalizeEmail(profile.email) : '';
+    const normalizedName = profile.fullName ? this.normalizeName(profile.fullName) : '';
+    const email = normalizedEmail || `demo-${normalizedProvider}@briefly.app`;
+    let user = await this.userRepo.findOne({
+      where: { email },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        level: true,
+        authProvider: true,
+        passwordHash: true,
+        passwordSalt: true,
+        emailVerified: true,
+        emailVerifiedAt: true,
+      },
+    });
+
+    if (user && user.authProvider !== normalizedProvider) {
+      throw new ConflictException(
+        `This email already uses ${user.authProvider} login. Please continue with that method.`,
+      );
+    }
 
     if (!user) {
       user = this.userRepo.create({
-        name: normalizedProvider.charAt(0).toUpperCase() + normalizedProvider.slice(1),
+        name:
+          normalizedName ||
+          normalizedProvider.charAt(0).toUpperCase() + normalizedProvider.slice(1),
         email,
         level: 'Explorer',
         authProvider: normalizedProvider,
@@ -223,6 +265,9 @@ export class AuthService {
         emailVerified: true,
         emailVerifiedAt: new Date(),
       });
+      user = await this.userRepo.save(user);
+    } else if (normalizedName && normalizedName !== user.name) {
+      user.name = normalizedName;
       user = await this.userRepo.save(user);
     }
 
@@ -256,6 +301,68 @@ export class AuthService {
     }
 
     return this.issueEmailVerification(user);
+  }
+
+  async requestPasswordReset(
+    email: string,
+  ): Promise<{ message: string; devResetUrl?: string }> {
+    const normalizedEmail = this.normalizeEmail(email);
+    const genericMessage =
+      'If an account exists for that email, we sent a reset link to the inbox.';
+
+    const user = await this.userRepo.findOne({
+      where: { email: normalizedEmail },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        authProvider: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!user || user.authProvider !== 'local' || !user.passwordHash) {
+      return { message: genericMessage };
+    }
+
+    const { rawToken, expiresAt } = this.createPasswordResetToken(
+      user.id,
+      user.email,
+      user.passwordHash,
+    );
+    const resetUrl = `${this.verificationBaseUrl}/auth/reset-password?token=${encodeURIComponent(rawToken)}`;
+    const emailResult = await this.authMailerService.sendPasswordResetEmail({
+      recipientEmail: user.email,
+      recipientName: user.name || 'there',
+      resetUrl,
+      expiresAt,
+    });
+
+    return {
+      message: genericMessage,
+      devResetUrl:
+        emailResult.provider === 'console' && !this.isProductionLike()
+          ? resetUrl
+          : undefined,
+    };
+  }
+
+  async resetPassword(token: string, password: string): Promise<{ message: string }> {
+    const normalizedPassword = (password || '').trim();
+    if (normalizedPassword.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters long.');
+    }
+
+    const user = await this.verifyPasswordResetToken(token);
+    const { hash, salt } = await this.hashPassword(normalizedPassword);
+    await this.userRepo.update(user.id, {
+      passwordHash: hash,
+      passwordSalt: salt,
+    });
+
+    return {
+      message: 'Password reset successfully. You can login with your new password now.',
+    };
   }
 
   async verifyEmailToken(token: string): Promise<VerifyEmailResult> {
@@ -418,6 +525,83 @@ export class AuthService {
     `;
   }
 
+  async buildPasswordResetHtml(token: string): Promise<string> {
+    try {
+      await this.verifyPasswordResetToken(token);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Reset link is invalid.';
+      return this.buildPasswordResetStatusHtml(message);
+    }
+
+    const escapedToken = this.escapeHtml(token);
+    return `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Reset Password</title>
+          <style>
+            body { font-family: Arial, sans-serif; background:#f8fafc; color:#0f172a; padding:24px; }
+            .card { max-width:520px; margin:0 auto; background:#fff; border-radius:12px; padding:24px; border:1px solid #e2e8f0; }
+            input { width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; margin:12px 0; font-size:16px; box-sizing:border-box; }
+            button { width:100%; padding:12px 16px; border:none; border-radius:8px; background:#0ea5e9; color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+            .muted { font-size:13px; color:#475569; }
+            .error { color:#dc2626; min-height:20px; margin-top:8px; }
+            .success { color:#16a34a; min-height:20px; margin-top:8px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1 style="margin:0 0 12px;font-size:24px;">Choose a new password</h1>
+            <p style="margin:0 0 18px;font-size:16px;line-height:1.5;">
+              Enter a new password for your Briefly account. It must be at least 8 characters long.
+            </p>
+            <input id="password" type="password" placeholder="New password" minlength="8" />
+            <button id="submit">Reset password</button>
+            <p class="muted">After this succeeds, return to the Briefly app and sign in again.</p>
+            <div id="message" class="error"></div>
+          </div>
+          <script>
+            const button = document.getElementById('submit');
+            const input = document.getElementById('password');
+            const message = document.getElementById('message');
+            button.addEventListener('click', async () => {
+              message.className = 'error';
+              message.textContent = '';
+              if (!input.value || input.value.trim().length < 8) {
+                message.textContent = 'Password must be at least 8 characters long.';
+                return;
+              }
+              button.disabled = true;
+              button.textContent = 'Saving...';
+              try {
+                const response = await fetch('${this.verificationBaseUrl}/auth/reset-password', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ token: '${escapedToken}', password: input.value.trim() }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                  throw new Error(data.message || 'Unable to reset password right now.');
+                }
+                message.className = 'success';
+                message.textContent = data.message || 'Password reset successfully.';
+                input.value = '';
+              } catch (error) {
+                message.className = 'error';
+                message.textContent = error?.message || 'Unable to reset password right now.';
+              } finally {
+                button.disabled = false;
+                button.textContent = 'Reset password';
+              }
+            });
+          </script>
+        </body>
+      </html>
+    `;
+  }
+
   private async issueEmailVerification(user: User): Promise<VerificationPendingResponse> {
     const rawToken = randomBytes(32).toString('hex');
     const tokenHash = this.hashVerificationToken(rawToken);
@@ -512,6 +696,125 @@ export class AuthService {
     return createHash('sha256').update(`${token}:${this.tokenSecret}`).digest('hex');
   }
 
+  private createPasswordResetToken(
+    userId: string,
+    email: string,
+    passwordHash: string,
+  ): { rawToken: string; expiresAt: Date } {
+    const exp = Math.floor(Date.now() / 1000) + 60 * 60;
+    const payload: PasswordResetTokenPayload = {
+      sub: userId,
+      email,
+      fp: createHash('sha256').update(passwordHash).digest('hex').slice(0, 24),
+      exp,
+      purpose: 'password-reset',
+    };
+    const payloadEncoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signature = createHmac('sha256', this.tokenSecret)
+      .update(payloadEncoded)
+      .digest('base64url');
+
+    return {
+      rawToken: `${RESET_TOKEN_PREFIX}${payloadEncoded}.${signature}`,
+      expiresAt: new Date(exp * 1000),
+    };
+  }
+
+  private async verifyPasswordResetToken(token: string): Promise<User> {
+    const normalizedToken = (token || '').trim();
+    if (!normalizedToken.startsWith(RESET_TOKEN_PREFIX)) {
+      throw new BadRequestException('Reset link is invalid.');
+    }
+
+    const compact = normalizedToken.slice(RESET_TOKEN_PREFIX.length);
+    const [payloadEncoded, signature] = compact.split('.');
+    if (!payloadEncoded || !signature) {
+      throw new BadRequestException('Reset link is invalid.');
+    }
+
+    const expectedSignature = createHmac('sha256', this.tokenSecret)
+      .update(payloadEncoded)
+      .digest('base64url');
+    const expectedBuffer = Buffer.from(expectedSignature);
+    const providedBuffer = Buffer.from(signature);
+
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      throw new BadRequestException('Reset link is invalid.');
+    }
+
+    let payload: PasswordResetTokenPayload;
+    try {
+      payload = JSON.parse(Buffer.from(payloadEncoded, 'base64url').toString('utf8')) as PasswordResetTokenPayload;
+    } catch {
+      throw new BadRequestException('Reset link is invalid.');
+    }
+
+    if (
+      !payload ||
+      payload.purpose !== 'password-reset' ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.email !== 'string' ||
+      typeof payload.fp !== 'string' ||
+      typeof payload.exp !== 'number'
+    ) {
+      throw new BadRequestException('Reset link is invalid.');
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (payload.exp <= nowSeconds) {
+      throw new BadRequestException('Reset link has expired.');
+    }
+
+    const user = await this.userRepo.findOne({
+      where: { id: payload.sub, email: payload.email.toLowerCase() },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        level: true,
+        authProvider: true,
+        passwordHash: true,
+        passwordSalt: true,
+        emailVerified: true,
+        emailVerifiedAt: true,
+      },
+    });
+
+    if (!user || user.authProvider !== 'local' || !user.passwordHash) {
+      throw new BadRequestException('Reset link is invalid.');
+    }
+
+    const fingerprint = createHash('sha256').update(user.passwordHash).digest('hex').slice(0, 24);
+    if (fingerprint !== payload.fp) {
+      throw new BadRequestException('Reset link is no longer valid.');
+    }
+
+    return user;
+  }
+
+  private buildPasswordResetStatusHtml(message: string): string {
+    return `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Invalid link</title>
+        </head>
+        <body style="font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;padding:24px;">
+          <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;padding:24px;border:1px solid #e2e8f0;">
+            <h1 style="margin:0 0 12px;font-size:24px;color:#dc2626;">Reset link unavailable</h1>
+            <p style="margin:0 0 18px;font-size:16px;line-height:1.5;">${this.escapeHtml(message)}</p>
+            <p style="margin:0;font-size:14px;color:#475569;">Return to Briefly and request a new password reset link.</p>
+          </div>
+        </body>
+      </html>
+    `;
+  }
+
   private createSignedToken(user: User): string {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const payload = {
@@ -533,5 +836,14 @@ export class AuthService {
   private isProductionLike(nodeEnvRaw?: string): boolean {
     const nodeEnv = (nodeEnvRaw || process.env.NODE_ENV || 'development').toLowerCase();
     return nodeEnv === 'production' || nodeEnv === 'stage';
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 }
