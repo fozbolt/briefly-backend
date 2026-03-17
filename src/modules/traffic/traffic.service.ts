@@ -167,26 +167,26 @@ export class TrafficService {
       );
 
       const summary = response.data.routes?.[0]?.summary;
-      // Note: TomTom returns these values in milliseconds, not seconds
-      const travelTimeMs = summary?.travelTimeInSeconds;
-      const noTrafficTravelTimeMs = summary?.noTrafficTravelTimeInSeconds;
-      const trafficDelayMs = summary?.trafficDelayInSeconds;
+      // TomTom returns travelTimeInSeconds in seconds (not milliseconds)
+      const travelTimeSec = summary?.travelTimeInSeconds;
+      const noTrafficTravelTimeSec = summary?.noTrafficTravelTimeInSeconds;
+      const trafficDelaySec = summary?.trafficDelayInSeconds;
       if (
-        typeof travelTimeMs !== 'number' ||
-        typeof noTrafficTravelTimeMs !== 'number'
+        typeof travelTimeSec !== 'number' ||
+        typeof noTrafficTravelTimeSec !== 'number'
       ) {
         return null;
       }
 
-      const durationMinutes = this.toMinutes(travelTimeMs / 1000); // Convert milliseconds to seconds first
+      const durationMinutes = this.toMinutes(travelTimeSec);
       const delayRatio =
-        noTrafficTravelTimeMs > 0
+        noTrafficTravelTimeSec > 0
           ? Math.max(
               0,
-              typeof trafficDelayMs === 'number'
-                ? trafficDelayMs / 1000
-                : (travelTimeMs - noTrafficTravelTimeMs) / 1000,
-            ) / (noTrafficTravelTimeMs / 1000)
+              typeof trafficDelaySec === 'number'
+                ? trafficDelaySec
+                : travelTimeSec - noTrafficTravelTimeSec,
+            ) / noTrafficTravelTimeSec
           : 0;
       const trafficLevel = this.classifyByDelay(delayRatio);
       const routeLabel = this.formatRouteLabel(origin, destination);
