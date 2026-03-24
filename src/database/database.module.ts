@@ -8,6 +8,7 @@ import { DigestCache } from './entities/digest-cache.entity';
 import { ContentItem } from './entities/content-item.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
 import { PushDevice } from './entities/push-device.entity';
+import { AnalyticsEvent } from './entities/analytics-event.entity';
 import { CacheCleanupService } from './cache-cleanup.service';
 
 const entities = [
@@ -18,6 +19,7 @@ const entities = [
   ContentItem,
   EmailVerificationToken,
   PushDevice,
+  AnalyticsEvent,
 ];
 
 @Module({
